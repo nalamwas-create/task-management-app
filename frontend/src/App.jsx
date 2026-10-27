@@ -35,76 +35,42 @@ export default function App() {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      if (response.status === 401 && token) {
-        logout();
-      }
-      throw new Error(data.message || data.error || "Request failed.");
+      throw new Error(
+        data.message || data.error || `Request failed (${response.status}).`
+      );
     }
 
     return data;
   }
 
   async function loadTasks() {
-    try {
-      const data = await request("/tasks");
-      setTasks(data.tasks || []);
-    } catch (error) {
-      setMessage(error.message);
+    const data = await request("/tasks");
+
+    // Support either { tasks: [...] } or a direct [...] response.
+    const taskList = Array.isArray(data)
+      ? data
+      : Array.isArray(data.tasks)
+        ? data.tasks
+        : Array.isArray(data.data?.tasks)
+          ? data.data.tasks
+          : null;
+
+    if (!taskList) {
+      throw new Error("The server returned an unexpected task list.");
     }
+
+    setTasks(taskList);
+    return taskList;
   }
 
   async function loadUser() {
-    try {
-      const data = await request("/me");
-      setUser(data.user?.email || data.email || "");
-      await loadTasks();
-    } catch {
-      sessionStorage.removeItem("task_manager_token");
-      setToken("");
-    }
-  }
+    const data = await request("/me");
+    const currentUser = data.user?.email || data.email || "";
 
-  useEffect(() => {
-    if (token) {
-      loadUser();
-    }
-    // Initial session validation only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setUser(currentUser);
 
-  async function handleAuth(event) {
-    event.preventDefault();
-    setLoading(true);
-    setMessage("");
-
-    try {
-      const endpoint = authMode === "login" ? "/login" : "/register";
-      const data = await request(endpoint, {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (authMode === "register") {
-        setMessage("Account created. Please log in.");
-        setAuthMode("login");
-        setPassword("");
-      } else {
-        const newToken = data.access_token || data.token;
-
-        if (!newToken) {
-          throw new Error("Login succeeded, but no access token was returned.");
-        }
-
-        sessionStorage.setItem("task_manager_token", newToken);
-        setToken(newToken);
-        setMessage("Login successful.");
-        setUser(email);
-      }
-    } catch (error) {
-      setMessage(error.message);
-    } finally {
-      setLoading(false);
-    }
+    // The task list must be loaded after the session is validated.
+    await loadTasks();
   }
 
   function logout() {
@@ -113,8 +79,114 @@ export default function App() {
     setUser("");
     setTasks([]);
     setPassword("");
+    setTitle("");
+    setDescription("");
     setMessage("");
     setEditingId(null);
+    setFilter("All");
+  }
+
+  // Validate the session and load tasks whenever the token changes.
+  useEffect(() => {
+    if (!token) {
+      setTasks([]);
+      setUser("");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function initialiseWorkspace() {
+      try {
+        const data = await request("/me");
+
+        if (cancelled) return;
+
+        setUser(data.user?.email || data.email || "");
+
+        const taskData = await request("/tasks");
+
+        if (cancelled) return;
+
+        const taskList = Array.isArray(taskData)
+          ? taskData
+          : Array.isArray(taskData.tasks)
+            ? taskData.tasks
+            : Array.isArray(taskData.data?.tasks)
+              ? taskData.data.tasks
+              : null;
+
+        if (!taskList) {
+          throw new Error("The server returned an unexpected task list.");
+        }
+
+        setTasks(taskList);
+      } catch (error) {
+        if (cancelled) return;
+
+        setMessage(error.message);
+
+        if (
+          error.message.toLowerCase().includes("token") ||
+          error.message.toLowerCase().includes("unauthorized") ||
+          error.message.includes("401")
+        ) {
+          sessionStorage.removeItem("task_manager_token");
+          setToken("");
+          setTasks([]);
+          setUser("");
+        }
+      }
+    }
+
+    initialiseWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+    // Re-run when login or logout changes the token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  async function handleAuth(event) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const endpoint = authMode === "login" ? "/login" : "/register";
+
+      const data = await request(endpoint, {
+        method: "POST",
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+        }),
+      });
+
+      if (authMode === "register") {
+        setMessage("Account created. Please log in.");
+        setAuthMode("login");
+        setPassword("");
+        return;
+      }
+
+      const newToken = data.access_token || data.token;
+
+      if (!newToken) {
+        throw new Error("Login succeeded, but no access token was returned.");
+      }
+
+      sessionStorage.setItem("task_manager_token", newToken);
+      setUser(data.user?.email || data.email || email.trim());
+      setToken(newToken);
+      setMessage("Login successful.");
+      setPassword("");
+    } catch (error) {
+      setMessage(error.message || "Unable to complete your request.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function saveTask(event) {
@@ -137,7 +209,6 @@ export default function App() {
             description: description.trim(),
           }),
         });
-        setMessage("Task updated.");
       } else {
         await request("/tasks", {
           method: "POST",
@@ -146,15 +217,21 @@ export default function App() {
             description: description.trim(),
           }),
         });
-        setMessage("Task created.");
       }
 
+      // Refresh first. Only report success if refreshing also succeeds.
+      await loadTasks();
+
+      setMessage(editingId !== null ? "Task updated." : "Task created.");
       setTitle("");
       setDescription("");
       setEditingId(null);
-      await loadTasks();
     } catch (error) {
-      setMessage(error.message);
+      setMessage(
+        `Unable to save or refresh the task list: ${
+          error.message || "Unknown error."
+        }`
+      );
     } finally {
       setLoading(false);
     }
@@ -164,32 +241,54 @@ export default function App() {
     setEditingId(task.id);
     setTitle(task.title);
     setDescription(task.description || "");
+    setMessage("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function cancelEdit() {
+    setEditingId(null);
+    setTitle("");
+    setDescription("");
+    setMessage("");
+  }
+
   async function toggleTask(task) {
-    const nextStatus = task.status === "Completed" ? "Pending" : "Completed";
+    const nextStatus =
+      task.status === "Completed" ? "Pending" : "Completed";
 
     try {
+      setMessage("");
+
       await request(`/tasks/${task.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: nextStatus }),
       });
+
       await loadTasks();
+      setMessage(
+        nextStatus === "Completed"
+          ? "Task marked as completed."
+          : "Task marked as pending."
+      );
     } catch (error) {
-      setMessage(error.message);
+      setMessage(error.message || "Unable to update task status.");
     }
   }
 
   async function deleteTask(id) {
-    if (!window.confirm("Are you sure you want to delete this task?")) return;
+    if (!window.confirm("Are you sure you want to delete this task?")) {
+      return;
+    }
 
     try {
+      setMessage("");
+
       await request(`/tasks/${id}`, { method: "DELETE" });
-      setMessage("Task deleted.");
       await loadTasks();
+
+      setMessage("Task deleted.");
     } catch (error) {
-      setMessage(error.message);
+      setMessage(error.message || "Unable to delete task.");
     }
   }
 
@@ -203,20 +302,34 @@ export default function App() {
     (task) => task.status === "Completed"
   ).length;
 
+  const pendingCount = tasks.filter(
+    (task) => task.status === "Pending"
+  ).length;
+
   if (!token) {
     return (
       <main className="auth-page">
         <section className="auth-card">
           <div className="brand-mark">T</div>
           <p className="eyebrow">YOUR PERSONAL WORKSPACE</p>
-          <h1>{authMode === "login" ? "Welcome back" : "Create your account"}</h1>
+
+          <h1>
+            {authMode === "login"
+              ? "Welcome back"
+              : "Create your account"}
+          </h1>
+
           <p className="muted">
             {authMode === "login"
               ? "Sign in to organise your day and get things done."
               : "Create an account to start managing your tasks."}
           </p>
 
-          {message && <div className="notice">{message}</div>}
+          {message && (
+            <div className="notice" role="status">
+              {message}
+            </div>
+          )}
 
           <form onSubmit={handleAuth} className="form-stack">
             <label htmlFor="email">Email address</label>
@@ -238,7 +351,9 @@ export default function App() {
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Enter your password"
               autoComplete={
-                authMode === "login" ? "current-password" : "new-password"
+                authMode === "login"
+                  ? "current-password"
+                  : "new-password"
               }
               minLength={8}
               required
@@ -258,13 +373,18 @@ export default function App() {
               ? "New here?"
               : "Already have an account?"}{" "}
             <button
+              type="button"
               className="text-button"
               onClick={() => {
-                setAuthMode(authMode === "login" ? "register" : "login");
+                setAuthMode(
+                  authMode === "login" ? "register" : "login"
+                );
                 setMessage("");
               }}
             >
-              {authMode === "login" ? "Create an account" : "Sign in"}
+              {authMode === "login"
+                ? "Create an account"
+                : "Sign in"}
             </button>
           </p>
         </section>
@@ -281,29 +401,44 @@ export default function App() {
         </div>
 
         <p className="sidebar-label">WORKSPACE</p>
-        <button className="nav-item active" onClick={() => setFilter("All")}>
+
+        <button
+          className={`nav-item ${filter === "All" ? "active" : ""}`}
+          onClick={() => setFilter("All")}
+        >
           <span>▦</span> All tasks
         </button>
+
         <button
-          className="nav-item"
+          className={`nav-item ${filter === "Pending" ? "active" : ""}`}
           onClick={() => setFilter("Pending")}
         >
           <span>◷</span> Pending
         </button>
+
         <button
-          className="nav-item"
+          className={`nav-item ${filter === "Completed" ? "active" : ""}`}
           onClick={() => setFilter("Completed")}
         >
           <span>✓</span> Completed
         </button>
 
         <div className="sidebar-bottom">
-          <div className="avatar">{(user || email || "U")[0].toUpperCase()}</div>
+          <div className="avatar">
+            {(user || email || "U")[0].toUpperCase()}
+          </div>
+
           <div className="user-info">
             <strong>{user || email || "Your account"}</strong>
             <span>Personal workspace</span>
           </div>
-          <button className="icon-button" onClick={logout} title="Sign out">
+
+          <button
+            className="icon-button"
+            onClick={logout}
+            title="Sign out"
+            aria-label="Sign out"
+          >
             ↪
           </button>
         </div>
@@ -321,9 +456,14 @@ export default function App() {
           <div className="page-heading">
             <div>
               <p className="eyebrow">MAKE TODAY COUNT</p>
-              <h1>My tasks<span className="heading-dot">.</span></h1>
-              <p className="muted">A little progress every day adds up.</p>
+              <h1>
+                My tasks<span className="heading-dot">.</span>
+              </h1>
+              <p className="muted">
+                A little progress every day adds up.
+              </p>
             </div>
+
             <div className="date-chip">
               <span>◷</span> Stay organised
             </div>
@@ -336,12 +476,14 @@ export default function App() {
               <strong>{tasks.length}</strong>
               <span className="stat-note">In your workspace</span>
             </article>
+
             <article className="stat-card">
               <span className="stat-icon amber">◷</span>
               <p>Pending</p>
-              <strong>{tasks.length - completedCount}</strong>
+              <strong>{pendingCount}</strong>
               <span className="stat-note">Still in progress</span>
             </article>
+
             <article className="stat-card">
               <span className="stat-icon green">✓</span>
               <p>Completed</p>
@@ -353,8 +495,12 @@ export default function App() {
           <section className="task-form-card">
             <div className="section-heading">
               <div>
-                <h2>{editingId !== null ? "Edit task" : "Create a task"}</h2>
-                <p className="muted">Capture what needs to get done.</p>
+                <h2>
+                  {editingId !== null ? "Edit task" : "Create a task"}
+                </h2>
+                <p className="muted">
+                  Capture what needs to get done.
+                </p>
               </div>
             </div>
 
@@ -367,27 +513,28 @@ export default function App() {
                 maxLength={200}
                 required
               />
+
               <textarea
                 value={description}
-                onChange={(event) => setDescription(event.target.value)}
+                onChange={(event) =>
+                  setDescription(event.target.value)
+                }
                 placeholder="Add a description (optional)"
                 aria-label="Task description"
                 rows={2}
               />
+
               <div className="form-actions">
                 {editingId !== null && (
                   <button
                     type="button"
                     className="outline-button"
-                    onClick={() => {
-                      setEditingId(null);
-                      setTitle("");
-                      setDescription("");
-                    }}
+                    onClick={cancelEdit}
                   >
                     Cancel
                   </button>
                 )}
+
                 <button className="primary-button" disabled={loading}>
                   {loading
                     ? "Saving..."
@@ -397,20 +544,32 @@ export default function App() {
                 </button>
               </div>
             </form>
-            {message && <div className="notice">{message}</div>}
+
+            {message && (
+              <div className="notice" role="status">
+                {message}
+              </div>
+            )}
           </section>
 
           <section className="task-list-section">
             <div className="section-heading task-list-heading">
               <div>
                 <h2>Your task list</h2>
-                <p className="muted">{visibleTasks.length} tasks shown</p>
+                <p className="muted">
+                  {visibleTasks.length} tasks shown
+                </p>
               </div>
+
               <div className="filter-group">
                 {["All", "Pending", "Completed"].map((item) => (
                   <button
                     key={item}
-                    className={filter === item ? "filter active-filter" : "filter"}
+                    className={
+                      filter === item
+                        ? "filter active-filter"
+                        : "filter"
+                    }
                     onClick={() => setFilter(item)}
                   >
                     {item}
@@ -422,7 +581,11 @@ export default function App() {
             {visibleTasks.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">✓</div>
-                <h3>{filter === "All" ? "A fresh start" : `No ${filter.toLowerCase()} tasks`}</h3>
+                <h3>
+                  {filter === "All"
+                    ? "A fresh start"
+                    : `No ${filter.toLowerCase()} tasks`}
+                </h3>
                 <p className="muted">
                   {filter === "All"
                     ? "Add your first task above and build momentum."
@@ -434,26 +597,61 @@ export default function App() {
                 {visibleTasks.map((task) => (
                   <article className="task-row" key={task.id}>
                     <button
-                      className={`task-check ${task.status === "Completed" ? "checked" : ""}`}
+                      className={`task-check ${
+                        task.status === "Completed" ? "checked" : ""
+                      }`}
                       onClick={() => toggleTask(task)}
                       aria-label={`Mark ${task.title} ${
-                        task.status === "Completed" ? "pending" : "completed"
+                        task.status === "Completed"
+                          ? "pending"
+                          : "completed"
                       }`}
                     >
                       {task.status === "Completed" ? "✓" : ""}
                     </button>
+
                     <div className="task-details">
-                      <h3 className={task.status === "Completed" ? "completed-title" : ""}>
+                      <h3
+                        className={
+                          task.status === "Completed"
+                            ? "completed-title"
+                            : ""
+                        }
+                      >
                         {task.title}
                       </h3>
+
                       {task.description && <p>{task.description}</p>}
                     </div>
-                    <span className={`status-pill ${task.status === "Completed" ? "status-completed" : "status-pending"}`}>
+
+                    <span
+                      className={`status-pill ${
+                        task.status === "Completed"
+                          ? "status-completed"
+                          : "status-pending"
+                      }`}
+                    >
                       {task.status}
                     </span>
+
                     <div className="task-actions">
-                      <button className="icon-button" onClick={() => startEdit(task)} title="Edit task">✎</button>
-                      <button className="icon-button danger" onClick={() => deleteTask(task.id)} title="Delete task">×</button>
+                      <button
+                        className="icon-button"
+                        onClick={() => startEdit(task)}
+                        title="Edit task"
+                        aria-label={`Edit ${task.title}`}
+                      >
+                        ✎
+                      </button>
+
+                      <button
+                        className="icon-button danger"
+                        onClick={() => deleteTask(task.id)}
+                        title="Delete task"
+                        aria-label={`Delete ${task.title}`}
+                      >
+                        ×
+                      </button>
                     </div>
                   </article>
                 ))}
@@ -463,7 +661,9 @@ export default function App() {
 
           <footer className="footer">
             <span>Taskflow · Personal productivity</span>
-            <span>{completedCount} of {tasks.length} completed</span>
+            <span>
+              {completedCount} of {tasks.length} completed
+            </span>
           </footer>
         </div>
       </section>
