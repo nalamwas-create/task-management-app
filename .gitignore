@@ -1,0 +1,54 @@
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+server/.env
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Python virtual environments
+venv/
+.venv/
+server/venv/
+
+# Local databases and backups
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.backup
+*.bak
+
+# Temporary troubleshooting and local test files
+server/test_fresh_migration.py
+server/app.py.backup
+server/models.py.backup
+server/tasks.db.backup
+frontend/package.json.backup
+
+# Node dependencies and generated builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+build/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+
+# Logs and operating-system files
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor and local workspace files
+.vscode/
+.idea/
+

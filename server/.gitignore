@@ -1,0 +1,21 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.swp
+
+# Virtual environments
+venv/
+.venv/
+
+# Local database
+tasks.db
+tasks.db-shm
+tasks.db-wal
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
