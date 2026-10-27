@@ -46,9 +46,6 @@ task_manager/
     ├── models.py
     ├── requirements.txt
     ├── seed.py
-    ├── .env
-    ├── instance/
-    │   └── tasks.db
     └── migrations/
         ├── env.py
         └── versions/
