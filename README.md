@@ -407,4 +407,27 @@ This is an educational project intended for local development. Before public dep
 
 The React production build has succeeded, the sample seed data has been created, and the initial database migration has been verified against a separate fresh SQLite database.
 
-Finish the
+The user-ownership security test has also passed all four checks:
+- A second user cannot see another user's task.
+- A second user cannot edit another user's task.
+- A second user cannot delete another user's task.
+- The task remains accessible to its owner after the denied attempts.
+
+## Submission Evidence
+
+The `submission_evidence/` directory contains a written record of the
+user-ownership security test. Capture genuine screenshots of the running
+application, successful task operations, and the security-test results
+if screenshots are required by the assignment.
+
+## Final Verification Checklist
+
+- [ ] Backend health endpoint responds successfully.
+- [ ] User registration and login work.
+- [ ] Authenticated users can create, view, update, and delete their own tasks.
+- [ ] Task ownership isolation checks pass.
+- [ ] Database migrations apply successfully.
+- [ ] Frontend production build succeeds.
+- [ ] README setup and API documentation are complete.
+- [ ] No secrets, authentication tokens, or local database files are committed.
+- [ ] Submission evidence is reviewed before pushing to GitHub.

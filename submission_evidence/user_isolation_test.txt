@@ -1,0 +1,23 @@
+TASK MANAGEMENT APP — USER OWNERSHIP SECURITY TEST
+
+Test method:
+Two separate registered users authenticated independently through
+the Flask API. User A created a task; User B attempted unauthorized
+access using User B's own JWT.
+
+Observed results from the test run:
+1. User B could not see User A's task — PASS (HTTP 200 listing).
+2. User B attempted to edit User A's task — PASS (HTTP 404).
+3. User B attempted to delete User A's task — PASS (HTTP 404).
+4. User A could still see the task afterward — PASS (HTTP 200 listing).
+
+Tested task ID: 10
+Owner user ID: 4
+Other user ID: 5
+
+Conclusion:
+All four ownership checks passed during this test run.
+
+Note:
+This is a written record of the observed results, not a screenshot.
+Capture a genuine terminal screenshot for visual submission evidence.
